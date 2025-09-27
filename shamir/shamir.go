@@ -7,7 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"fmt"
-	mathrand "math/rand"
+	"math/big"
 )
 
 const (
@@ -130,6 +130,28 @@ func add(a, b uint8) uint8 {
 	return a ^ b
 }
 
+// cryptoPerm returns a cryptographically-random permutation of [0..n).
+// n must be <= 255 here since we only draw x in 1..255.
+func cryptoPerm(n int) ([]int, error) {
+	if n < 0 || n > 255 {
+		return nil, fmt.Errorf("invalid n for cryptoPerm")
+	}
+	a := make([]int, n)
+	for i := 0; i < n; i++ {
+		a[i] = i
+	}
+	// Fisher–Yates with crypto/rand
+	for i := n - 1; i > 0; i-- {
+		jBig, err := rand.Int(rand.Reader, big.NewInt(int64(i+1)))
+		if err != nil {
+			return nil, err
+		}
+		j := int(jBig.Int64())
+		a[i], a[j] = a[j], a[i]
+	}
+	return a, nil
+}
+
 // Split takes an arbitrarily long secret and generates a `parts`
 // number of shares, `threshold` of which are required to reconstruct
 // the secret. The parts and threshold must be at least 2, and less
@@ -153,9 +175,11 @@ func Split(secret []byte, parts, threshold int) ([][]byte, error) {
 		return nil, fmt.Errorf("cannot split an empty secret")
 	}
 
-	// Generate random list of x coordinates
-	// mathrand.Seed(time.Now().UnixNano())
-	xCoordinates := mathrand.Perm(255)
+	// Generate crypto-random list of x coordinates
+	xCoordinates, err := cryptoPerm(255)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate x-coordinates: %w", err)
+	}
 
 	// Allocate the output array, initialize the final byte
 	// of the output with the offset. The representation of each
@@ -167,9 +191,6 @@ func Split(secret []byte, parts, threshold int) ([][]byte, error) {
 	}
 
 	// Construct a random polynomial for each byte of the secret.
-	// Because we are using a field of size 256, we can only represent
-	// a single byte as the intercept of the polynomial, so we must
-	// use a new polynomial for each byte.
 	for idx, val := range secret {
 		p, err := makePolynomial(val, uint8(threshold-1))
 		if err != nil {
@@ -177,8 +198,6 @@ func Split(secret []byte, parts, threshold int) ([][]byte, error) {
 		}
 
 		// Generate a `parts` number of (x,y) pairs
-		// We cheat by encoding the x value once as the final index,
-		// so that it only needs to be stored once.
 		for i := 0; i < parts; i++ {
 			x := uint8(xCoordinates[i]) + 1
 			y := p.evaluate(x)
@@ -216,8 +235,7 @@ func Combine(parts [][]byte) ([]byte, error) {
 	x_samples := make([]uint8, len(parts))
 	y_samples := make([]uint8, len(parts))
 
-	// Set the x value for each sample and ensure no x_sample values are the same,
-	// otherwise div() can be unhappy
+	// Set the x value for each sample and ensure no x_sample values are the same
 	checkMap := map[byte]bool{}
 	for i, part := range parts {
 		samp := part[firstPartLen-1]

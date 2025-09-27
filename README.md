@@ -56,6 +56,7 @@ Notes:
 * Constraints: `2 ≤ t ≤ n ≤ 255`; secret must be non-empty.
 * Each Base64 share decodes to `len(secret) + 1` bytes (Shamir tag + data).
 * After splitting, a self-test recombines a random `t`-subset; if it fails, the program exits with error.
+* Implementation details: share X-coordinates are chosen via a **cryptographically secure permutation**; sensitive buffers are **zeroized** best-effort after use; Base64 output to files/stdout is **streamed** to avoid keeping large Base64 strings in memory.
 
 ### Combine
 
@@ -70,6 +71,11 @@ Use either `-shares` (comma-separated Base64 strings) **or** `-files` (paths to 
 ```
 
 If `-out` is omitted, the recovered bytes are printed as text. For binary secrets, **always** use `-out`.
+
+## Security notes
+
+* **Memory handling:** the tool zeroizes sensitive byte slices when possible. However, command-line arguments and Go strings cannot be reliably wiped; prefer `-in`/`-files` over `-secret`/`-shares` for better hygiene.
+* **Integrity:** plain SSS provides confidentiality/availability but not authenticity. This CLI does **not** authenticate the secret; combining wrong or tampered shares may yield garbage without error.
 
 ## Testing
 
